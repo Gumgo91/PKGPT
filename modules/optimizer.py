@@ -202,31 +202,65 @@ class NONMEMOptimizer:
         with open(input_file, 'w') as f:
             # Update $DATA line to point to actual data file
             code = self.current_code
-            # Find $DATA line and replace filename
+            # Use absolute path to ensure NONMEM can find the data file
+            # Convert to forward slashes for cross-platform compatibility
+            absolute_data_path = os.path.abspath(self.data_file).replace('\\', '/')
+            # Find $DATA line and replace filename with absolute path
             code = re.sub(
                 r'\$DATA\s+\S+',
-                f'$DATA {os.path.basename(self.data_file)}',
+                f'$DATA {absolute_data_path}',
                 code,
                 flags=re.IGNORECASE
             )
             f.write(code)
 
         print(f"\nExecuting NONMEM: {self.nmfe_command} {input_file} {output_file}")
+        print("  [INFO] This may take a few minutes...")
 
         try:
-            # Check if NONMEM command exists
+            # Execute NONMEM
+            # Simple execution, rely on lst file for results
             result = subprocess.run(
                 [self.nmfe_command, input_file, output_file],
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minute timeout
+                timeout=600,
                 cwd=os.path.dirname(os.path.abspath(input_file)) or '.'
             )
 
-            print(f"[OK] NONMEM execution completed (exit code: {result.returncode})")
+            print(f"  [INFO] NONMEM process finished (exit code: {result.returncode})")
 
-            # Check if output file was created
+            # Wait for output file to be fully written
+            # NONMEM might still be writing even after process returns
             if os.path.exists(output_file):
+                print("  [INFO] Waiting for output file to be complete...")
+                max_wait = 30  # seconds
+                wait_interval = 1  # second
+                waited = 0
+                prev_size = 0
+                stable_count = 0
+
+                while waited < max_wait:
+                    time.sleep(wait_interval)
+                    waited += wait_interval
+
+                    # Check if file size is stable
+                    try:
+                        current_size = os.path.getsize(output_file)
+                        if current_size == prev_size:
+                            stable_count += 1
+                            if stable_count >= 3:  # Stable for 3 seconds
+                                # Also check if "Stop Time" appears in file
+                                with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                    if 'Stop Time' in content or 'Stop time' in content.lower():
+                                        print("  [OK] Output file complete")
+                                        return True
+                        else:
+                            stable_count = 0
+                            prev_size = current_size
+                    except:
+                        pass
+
+                print(f"  [OK] NONMEM execution completed")
                 return True
             else:
                 print("[WARNING] Output file not created")
@@ -270,7 +304,14 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
         output_file = f"{self.output_base}_iter{self.iteration}.lst"
 
         try:
-            parser = NONMEMParser(output_file)
+            # Pass gemini_client to parser for AI-based parsing
+            # Get the underlying client for the selected model
+            selected_client = self.gemini_client.clients.get(self.model)
+            parser = NONMEMParser(
+                output_file,
+                gemini_client=selected_client,
+                use_ai_parsing=True
+            )
             print("\n" + parser.get_summary())
             return parser
 
@@ -303,23 +344,66 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
         minimization_ok = parsed_data.get('minimization_successful', False)
         issues = parser.get_issues()
 
+        # Extract RSE and Shrinkage metrics
+        rse_data = parsed_data.get('rse_percent', {})
+        eta_shrinkage = parsed_data.get('eta_shrinkage', [])
+
+        max_rse = rse_data.get('max_rse')
+        high_rse_count = rse_data.get('high_rse_count', 0)
+        avg_eta_shrinkage = sum([s['shrinkage'] for s in eta_shrinkage]) / len(eta_shrinkage) if eta_shrinkage else None
+
         # Record history
         history_entry = {
             'iteration': self.iteration,
             'status': 'success' if minimization_ok else 'failed',
             'ofv': current_ofv,
+            'max_rse': max_rse,
+            'high_rse_count': high_rse_count,
+            'avg_eta_shrinkage': avg_eta_shrinkage,
             'issues': issues,
             'minimization_successful': minimization_ok
         }
 
         self.improvement_history.append(history_entry)
 
-        # Update best OFV
+        # Evaluate model quality: Consider OFV + RSE + Shrinkage
         if current_ofv is not None and minimization_ok:
-            if self.best_ofv is None or current_ofv < self.best_ofv:
+            is_better = False
+
+            if self.best_ofv is None:
+                is_better = True
+            else:
+                # Primary: OFV decreased
+                ofv_improved = current_ofv < self.best_ofv
+
+                # Secondary: RSE/Shrinkage improved
+                prev_entry = next((e for e in reversed(self.improvement_history[:-1])
+                                 if e.get('minimization_successful')), None)
+
+                if prev_entry:
+                    prev_max_rse = prev_entry.get('max_rse')
+                    prev_shrink = prev_entry.get('avg_eta_shrinkage')
+
+                    rse_improved = (max_rse is not None and prev_max_rse is not None
+                                   and max_rse < prev_max_rse)
+                    shrink_improved = (avg_eta_shrinkage is not None and prev_shrink is not None
+                                      and avg_eta_shrinkage < prev_shrink)
+
+                    # Improved if OFV better, or if RSE/Shrinkage significantly better
+                    if ofv_improved or (rse_improved and high_rse_count == 0) or shrink_improved:
+                        is_better = True
+                else:
+                    is_better = ofv_improved
+
+            if is_better:
                 self.best_ofv = current_ofv
                 self.best_iteration = self.iteration
-                print(f"\n[OK] NEW BEST MODEL: OFV = {self.best_ofv:.2f}")
+                quality_parts = [f"OFV={self.best_ofv:.2f}"]
+                if max_rse is not None:
+                    quality_parts.append(f"MaxRSE={max_rse:.1f}%")
+                if avg_eta_shrinkage is not None:
+                    quality_parts.append(f"AvgETAshrink={avg_eta_shrinkage:.1f}%")
+                print(f"\n[OK] NEW BEST MODEL: {', '.join(quality_parts)}")
 
         # Decision logic
         if not minimization_ok:
@@ -363,12 +447,18 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                 nonmem_output = "Could not read output file"
             issues = ["Output file could not be parsed properly"]
 
+        # Gemini has 1M token context - can handle full NONMEM output
+        # Only truncate if extremely large (>500KB = ~250K tokens)
+        if len(nonmem_output) > 500000:
+            print(f"  [INFO] Large output ({len(nonmem_output)} chars), using smart truncation")
+            nonmem_output = self._smart_truncate_output(nonmem_output, max_length=200000)
+
         # Generate improvement prompt
         prompt = PromptTemplates.improvement_prompt(
             iteration=self.iteration,
             dataset_info=self.data_loader.get_column_summary(),
             current_code=self.current_code,
-            nonmem_output=nonmem_output[:5000],  # Limit size
+            nonmem_output=nonmem_output,  # Full output (unless very large)
             previous_improvements=self.improvement_history,
             issues_found=issues
         )
@@ -392,6 +482,45 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
             self.improvement_history[-1]['changes'] = changes or 'Not specified'
 
         print(f"[OK] Improved code generated for next iteration")
+
+    def _smart_truncate_output(self, output: str, max_length: int = 8000) -> str:
+        """
+        Intelligently truncate NONMEM output to keep most important parts
+
+        Priority:
+        1. Error messages (first 2000 chars)
+        2. Final parameter estimates (search for "FINAL")
+        3. Objective function value
+        4. Middle section if space remains
+        """
+        if len(output) <= max_length:
+            return output
+
+        # Always keep the beginning (errors usually here)
+        head_size = min(2000, max_length // 2)
+        head = output[:head_size]
+
+        # Try to find and keep final parameter estimates
+        final_match = re.search(r'FINAL PARAMETER ESTIMATE.*?(?=\n\s*\n|\Z)', output, re.DOTALL | re.IGNORECASE)
+
+        if final_match:
+            final_section = final_match.group(0)
+            remaining = max_length - head_size - len(final_section) - 200
+
+            if remaining > 0:
+                # Include some middle context
+                middle_start = head_size
+                middle_end = middle_start + remaining
+                middle = output[middle_start:middle_end]
+
+                return f"{head}\n\n... [middle section truncated] ...\n\n{middle}\n\n{final_section}"
+            else:
+                return f"{head}\n\n... [truncated] ...\n\n{final_section}"
+        else:
+            # No final estimates found, keep head and tail
+            tail_size = min(1000, max_length - head_size)
+            tail = output[-tail_size:]
+            return f"{head}\n\n... [middle section truncated ({len(output) - head_size - tail_size} chars)] ...\n\n{tail}"
 
     def _extract_section(self, text: str, section_name: str) -> Optional[str]:
         """Extract a section from response text"""

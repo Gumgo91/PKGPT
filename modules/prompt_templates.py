@@ -47,105 +47,63 @@ MODEL DEVELOPMENT FRAMEWORK
 ═══════════════════════════════════════════════════════════════════
 
 PHASE 1: STRUCTURAL MODEL SELECTION
-Assess administration route and disposition characteristics:
-- Oral administration (AMT>0, EVID=1, CMT=1): Use ADVAN2 TRANS2
-  * ADVAN2: 1-compartment with first-order absorption
-  * Parameters: CL, V, KA
-  * Scaling: S2 = V (depot compartment scales by central volume)
+Choose ADVAN based on data:
+- Oral 1-compartment: ADVAN2 TRANS2
+  * MUST define: CL, V, KA
+  * MUST define: K = CL/V (elimination rate constant)
+  * MUST define: S2 = V (scaling factor)
+- IV 1-compartment: ADVAN1 TRANS2
+  * MUST define: CL, V
+  * MUST define: K = CL/V (elimination rate constant)
+  * MUST define: S1 = V (scaling factor)
+- Oral 2-compartment: ADVAN4 TRANS4 (CL, V2, Q, V3, KA, S2=V2)
+- IV 2-compartment: ADVAN3 TRANS4 (CL, V1, Q, V2, S1=V1)
 
-- IV bolus/infusion (AMT>0, RATE>=0): Use ADVAN1 TRANS2 or ADVAN2
-  * ADVAN1: 1-compartment IV
-  * Parameters: CL, V
-  * Scaling: S1 = V
+**CRITICAL: K=CL/V MUST be explicitly defined for ADVAN1/ADVAN2 TRANS2.**
+Without explicit K definition, numerical instability will occur.
 
-Start with the simplest model that captures the essential PK processes.
+Start simple. Don't overcomplicate unless data demands it.
 
-PHASE 2: PARAMETER ESTIMATION STRATEGY
-Typical population values (adjust based on drug class):
-- Clearance (CL): 1-10 L/h for small molecules
-  * Renal clearance: ~GFR × fu (~8 L/h)
-  * Hepatic clearance: can approach liver blood flow (~90 L/h)
+PHASE 2: INITIAL PARAMETER ESTIMATES
+Typical values for small molecules:
+- CL: 1-10 L/h
+- V: 10-100 L
+- KA: 0.5-3 h⁻¹
 
-- Volume of distribution (V): 10-100 L
-  * Hydrophilic drugs: ~0.2-0.3 L/kg (~15-20 L/70kg)
-  * Lipophilic drugs: ~1-10 L/kg (70-700 L/70kg)
+PHASE 3: COVARIATES
+Weight effects (if available):
+- CL: TVCL = THETA(1) * (WT/70)^0.75
+- V: TVV = THETA(2) * (WT/70)^1
 
-- Absorption rate constant (KA): 0.5-3 h⁻¹ for oral drugs
-  * Fast absorption: >2 h⁻¹
-  * Moderate: 0.5-2 h⁻¹
-  * Slow/sustained release: <0.5 h⁻¹
-
-PHASE 3: COVARIATE MODEL SPECIFICATION
-Implement physiologically-based covariate relationships:
-
-Weight effects (use allometric scaling):
-- On CL: TVCL = THETA(CL) * (WT/70)^0.75
-  * Exponent 0.75: metabolic scaling law
-- On V: TVV = THETA(V) * (WT/70)^1
-  * Exponent 1: proportional to body size
-
-Other covariates (if data supports):
-- Age on CL: consider maturation/decline functions
-- Renal function on CL: CRCL effects for renally eliminated drugs
-- Sex, genotype: include only if mechanistically justified
-
-PHASE 4: RANDOM EFFECTS STRUCTURE
-Inter-individual variability (IIV):
-- Lognormal distribution: P_i = TV_P * EXP(ETA_i)
-- Interpretation: ETA ~ N(0, OMEGA)
-- Initial OMEGA values: 0.1-0.3 (corresponds to ~30-55% CV)
-
-Start with diagonal OMEGA matrix (assume independence):
+PHASE 4: RANDOM EFFECTS
+Use diagonal OMEGA (one value per line):
 $OMEGA
 0.1  ; IIV on CL
 0.1  ; IIV on V
-0.2  ; IIV on KA (if oral)
+0.2  ; IIV on KA
 
-Consider BLOCK structure only if:
-- Strong physiological basis for correlation
-- Sufficient data to support estimation
-- Improved model diagnostics
+Never use BLOCK OMEGA or multi-value lines.
 
-PHASE 5: RESIDUAL ERROR MODEL
-Select error structure based on data characteristics:
+PHASE 5: RESIDUAL ERROR
+Start with proportional error:
+$ERROR
+IPRED = F
+Y = IPRED * (1 + EPS(1))
 
-a) Proportional error (recommended for PK data):
-   IPRED = F
-   Y = IPRED * (1 + EPS(1))
+$SIGMA
+0.04  ; Proportional error
 
-   When: Error scales with concentration
-   SIGMA: 0.04-0.1 (20-30% CV)
-
-b) Combined proportional + additive:
-   IPRED = F
-   W = IPRED
-   Y = IPRED + W*EPS(1) + EPS(2)
-
-   When: Constant error at low concentrations, proportional at high
-   SIGMA(1): 0.04-0.1 (proportional)
-   SIGMA(2): 0.1-1 (additive, in concentration units)
-
-c) Additive (rarely used alone):
-   IPRED = F
-   Y = IPRED + EPS(1)
-
-   When: Constant absolute error (uncommon for PK)
-
-PHASE 6: ESTIMATION METHOD CONFIGURATION
-Use first-order conditional estimation:
+PHASE 6: ESTIMATION
+Use METHOD=1 INTER (FOCE with interaction) as default:
 $ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
-
-Parameters:
-- METHOD=1: FOCE (First-Order Conditional Estimation)
-- INTER: Interaction between IIV (ETA) and residual error (EPS)
-- MAXEVAL=9999: Maximum function evaluations
-- PRINT=5: Print every 5th iteration
-- POSTHOC: Compute individual parameter estimates
-
-Add covariance step:
 $COVARIANCE PRINT=E
-- Estimates parameter uncertainty (SE, RSE%)
-- Computes correlations between parameters
+
+**NOTE: Use METHOD=1 (FOCE-I) for most models. Use METHOD=SAEM only for:**
+- Complex models that fail with METHOD=1
+- Models with categorical outcomes
+- After 3+ failed attempts with METHOD=1
+
+Starting with METHOD=SAEM often causes numerical problems for basic PK models.
 
 ═══════════════════════════════════════════════════════════════════
 CRITICAL SYNTAX REQUIREMENTS
@@ -156,12 +114,26 @@ CRITICAL SYNTAX REQUIREMENTS
    - Use DROP for unused columns
    - Example: $INPUT ID TIME AMT DV EVID MDV CMT WT SEX DROP DROP
 
-2. $PK Block Requirements:
-   - Define all typical values (TVCL, TVV, TVKA)
-   - Apply covariate effects to typical values
-   - Define individual parameters with EXP(ETA) for lognormal
-   - MUST define scaling: S2 = V (for ADVAN2) or S1 = V (for ADVAN1)
-   - Assign CL, V, KA to NONMEM-recognized names
+2. $PK Block Requirements (IN THIS ORDER):
+   a. Define all typical values (TVCL, TVV, TVKA)
+   b. Apply covariate effects to typical values
+   c. Define individual parameters with EXP(ETA) for lognormal
+   d. **MUST define K = CL/V for ADVAN1/ADVAN2 TRANS2**
+   e. MUST define scaling: S2 = V (for ADVAN2) or S1 = V (for ADVAN1)
+
+   Example for ADVAN2 TRANS2:
+   ```
+   TVCL = THETA(1) * (WT/70)**0.75  ; if covariate
+   TVV  = THETA(2) * (WT/70)**1.0
+   TVKA = THETA(3)
+
+   CL = TVCL * EXP(ETA(1))
+   V  = TVV * EXP(ETA(2))
+   KA = TVKA * EXP(ETA(3))
+
+   K = CL/V    ; CRITICAL: Must define explicitly
+   S2 = V      ; Scaling factor
+   ```
 
 3. $ERROR Block Requirements:
    - MUST define IPRED = F first
@@ -200,7 +172,7 @@ Requirements:
 Structure:
 $PROBLEM [descriptive title]
 $DATA [filename] IGNORE=@
-$INPUT [all columns]
+$INPUT [all columns IN THE EXACT ORDER they appear in the dataset]
 $SUBROUTINES [ADVAN TRANS]
 $PK [parameter model]
 $ERROR [error model]
@@ -210,6 +182,8 @@ $SIGMA [residual error]
 $ESTIMATION [method settings]
 $COVARIANCE [options]
 $TABLE [output specification]
+
+**CRITICAL: DO NOT add $END or any other statement after $TABLE. The file ends naturally.**
 
 Generate the control stream now:
 """
@@ -241,6 +215,9 @@ Generate the control stream now:
         history_text = _format_improvement_history(previous_improvements)
         issues_text = "\n".join([f"- {issue}" for issue in issues_found]) if issues_found else "None detected"
 
+        # Check if we have OFV from history
+        has_ofv = any(h.get('ofv') is not None for h in previous_improvements)
+
         prompt = f"""Diagnose and resolve issues in the NONMEM model.
 
 ═══════════════════════════════════════════════════════════════════
@@ -264,71 +241,75 @@ OPTIMIZATION HISTORY:
 {history_text}
 
 ═══════════════════════════════════════════════════════════════════
-DIAGNOSTIC FRAMEWORK
+TWO-PHASE OPTIMIZATION STRATEGY
 ═══════════════════════════════════════════════════════════════════
 
-LEVEL 1: SYNTAX AND STRUCTURAL ERRORS
-Check for:
-□ Column name mismatches ($INPUT vs dataset)
-□ Missing scaling parameter (S1 or S2 in $PK)
-□ Incorrect $ERROR syntax (especially combined error model)
-□ Parameter bound violations (initial outside [lower, upper])
-□ Undefined variables referenced in equations
-□ FORTRAN syntax errors (operators, parentheses)
+{'PHASE 1: MAKE IT RUN (Current Phase - No OFV yet)' if not has_ofv else 'PHASE 2: MAKE IT BETTER (OFV available - Focus on improvement)'}
 
-Common fixes:
-- $ERROR combined model: Must use IPRED=F, W=IPRED, then Y=IPRED+W*EPS(1)+EPS(2)
-- Scaling: Add S2=V (ADVAN2) or S1=V (ADVAN1) in $PK
-- Columns: Verify all referenced columns exist in dataset
+{'**CRITICAL: The model is not producing OFV yet. Focus ONLY on getting estimation to run successfully.**' if not has_ofv else '**The model runs successfully. Focus on improving OFV, RSE%, and Shrinkage.**'}
 
-LEVEL 2: NUMERICAL STABILITY ISSUES
-Check for:
-□ Initial estimates orders of magnitude off
-□ OMEGA/SIGMA too large (>1) or too small (<0.001)
-□ Parameters hitting bounds during estimation
-□ Rounding errors or ill-conditioning warnings
-
-Remediation strategies:
-- Adjust THETA initial values to physiologically realistic ranges
-- Reduce IIV initial estimates (try 0.1-0.3)
-- Simplify OMEGA structure (use diagonal instead of BLOCK)
-- Remove poorly estimated random effects
-
-LEVEL 3: MODEL OVERPARAMETERIZATION
-Symptoms:
-- High RSE% (>50%) on multiple parameters
-- Correlation coefficients near ±1
-- Failure to compute covariance matrix
-- Boundary estimates (OMEGA or SIGMA near zero)
-
-Solutions:
-- Fix or remove IIV on poorly estimated parameters
-- Simplify covariate relationships
-- Use fewer random effects
-- Consider simpler structural model
-
-LEVEL 4: CONVERGENCE PROBLEMS
-If minimization not successful:
-1. Check for programming errors first (Level 1)
-2. Try different initial estimates
-3. Simplify random effects structure
-4. Increase MAXEVAL or try different METHOD
-5. Fix problematic parameters temporarily
+{'PHASE 1 PRIORITIES (Make it run):' if not has_ofv else 'PHASE 2 PRIORITIES (Make it better):'}
+{'1. SYNTAX ERRORS - Fix immediately' if not has_ofv else '1. OFV IMPROVEMENT'}
+{'   - Missing S2=V or S1=V in $PK' if not has_ofv else '   - Try different error models'}
+{'   - Wrong $OMEGA format (use diagonal: one value per line)' if not has_ofv else '   - Add covariates if RSE is good'}
+{'   - $DATA file path issues' if not has_ofv else '   - Optimize OMEGA values'}
+{'   - Column name mismatches' if not has_ofv else ''}
+{'2. STRUCTURAL ISSUES' if not has_ofv else '2. RSE% REDUCTION'}
+{'   - Data/model mismatch (CMT issues, ADVAN mismatch)' if not has_ofv else '   - Simplify if RSE > 50%'}
+{'   - Missing K=CL/V for ADVAN2' if not has_ofv else '   - Add covariates if RSE < 30%'}
+{'   - Wrong compartment for observations' if not has_ofv else ''}
+{'3. INITIAL VALUES' if not has_ofv else '3. SHRINKAGE REDUCTION'}
+{'   - Use safe defaults: CL=3, V=30, KA=1' if not has_ofv else '   - Target < 30% ETA shrinkage'}
+{'   - Conservative OMEGA (0.04-0.1)' if not has_ofv else '   - Adjust IIV structure'}
+{'4. SIMPLIFICATION' if not has_ofv else '4. MODEL COMPLEXITY'}
+{'   - Start with simplest model' if not has_ofv else '   - Add complexity only if justified'}
+{'   - Remove INTER if unstable' if not has_ofv else '   - Balance fit vs parsimony'}
+{'   - Use proportional error only' if not has_ofv else ''}
 
 ═══════════════════════════════════════════════════════════════════
-IMPROVEMENT STRATEGY
+TROUBLESHOOTING CHECKLIST
 ═══════════════════════════════════════════════════════════════════
 
-Priority order:
-1. Fix syntax errors (model won't run)
-2. Correct structural problems (S2 missing, wrong ADVAN)
-3. Adjust initial estimates (numerical issues)
-4. Simplify if overparameterized
-5. Refine once stable
+1. Check NONMEM output for:
+   - "MINIMIZATION SUCCESSFUL" → Model ran ✓
+   - "#OBJV:" with a number → OFV available ✓
+   - Only "NM-TRAN" + "Stop Time" → Compilation only, no estimation ✗
+   - "UNKNOWN CONTROL RECORD" → Syntax error (often $END) ✗
 
-Make ONE targeted change per iteration:
-- Focus on the most critical issue
-- Preserve what works
+2. Common reasons estimation doesn't run or produces bad results:
+   - **$END statement** → Remove it! NONMEM doesn't recognize $END
+   - **$INPUT order wrong** → Must match exact column order in CSV
+   - **Missing K=CL/V** → MUST define explicitly for ADVAN1/ADVAN2 TRANS2
+   - **Using METHOD=SAEM for simple models** → Switch to METHOD=1 INTER
+   - **Parameters hitting boundaries** → CL/V at lower/upper bounds = bad model
+   - Data file path wrong
+   - CMT mismatch (observations in wrong compartment)
+   - Missing scaling (S1, S2)
+   - Invalid initial values (negative, too extreme)
+
+3. Signs of fundamental model problems (requires structural fix):
+   - Parameters hitting boundaries (CL=0.1, V=100)
+   - OMEGA collapsing to ~0 (< 1e-10)
+   - OFV > 100,000 (unreasonably high)
+   - ETA shrinkage > 90%
+   - SE larger than estimate
+   - "GRADIENT TO THETA IS ZERO" warnings
+
+   → These indicate model misspecification, not just numerical issues
+
+4. Don't change ADVAN randomly:
+   - Stick with ADVAN2 for oral until confirmed wrong
+   - Only switch after 3+ iterations with same error
+
+5. CRITICAL: Never add $END - the file ends naturally after $TABLE
+
+═══════════════════════════════════════════════════════════════════
+RESPONSE GUIDELINES
+═══════════════════════════════════════════════════════════════════
+
+Make ONE focused change:
+- Fix the most critical issue blocking estimation
+- Preserve everything else that works
 - Avoid multiple simultaneous changes
 - Document the rationale
 

@@ -60,32 +60,58 @@ class GeminiClient:
 
         print(f"[OK] Initialized Gemini client with model: {self.model_name}")
 
-    def generate(self, prompt: str, retry_attempts: int = 3) -> str:
+    def generate(self, prompt: str, retry_attempts: int = 3, timeout: int = 60) -> str:
         """
         Generate response from Gemini API with retry logic
 
         Args:
             prompt: Input prompt
             retry_attempts: Number of retry attempts on failure
+            timeout: Timeout in seconds for API call
 
         Returns:
             Generated text response
         """
         for attempt in range(retry_attempts):
             try:
-                response = self.model.generate_content(prompt)
+                print(f"  [INFO] Calling Gemini API (attempt {attempt + 1}/{retry_attempts}, timeout={timeout}s)...")
+                start_time = time.time()
+
+                response = self.model.generate_content(
+                    prompt,
+                    request_options={'timeout': timeout}
+                )
+
+                elapsed = time.time() - start_time
 
                 # Check if response has valid text
                 if response.text:
+                    print(f"  [OK] Received response ({len(response.text)} chars, took {elapsed:.1f}s)")
                     return response.text
                 else:
                     print(f"[WARNING] Empty response received (attempt {attempt + 1}/{retry_attempts})")
 
             except Exception as e:
-                print(f"[WARNING] Error generating response (attempt {attempt + 1}/{retry_attempts}): {e}")
+                elapsed = time.time() - start_time
+                error_msg = str(e)
+
+                if 'timeout' in error_msg.lower() or elapsed >= timeout:
+                    print(f"[WARNING] API call timed out after {elapsed:.1f}s (attempt {attempt + 1}/{retry_attempts})")
+                elif '429' in error_msg or 'rate limit' in error_msg.lower():
+                    print(f"[WARNING] Rate limit exceeded (attempt {attempt + 1}/{retry_attempts})")
+                    # Longer wait for rate limits
+                    if attempt < retry_attempts - 1:
+                        wait_time = 30
+                        print(f"  Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+                        continue
+                elif '500' in error_msg or '503' in error_msg:
+                    print(f"[WARNING] Server error (attempt {attempt + 1}/{retry_attempts}): {error_msg[:100]}")
+                else:
+                    print(f"[WARNING] Error generating response (attempt {attempt + 1}/{retry_attempts}): {error_msg[:200]}")
 
                 if attempt < retry_attempts - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff
+                    wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4 seconds
                     print(f"  Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
