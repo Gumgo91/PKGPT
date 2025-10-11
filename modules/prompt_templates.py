@@ -29,60 +29,189 @@ class PromptTemplates:
         Returns:
             Formatted prompt string
         """
-        prompt = f"""You are an expert pharmacometrician specializing in NONMEM modeling.
+        prompt = f"""You are an expert pharmacometrician tasked with developing a population pharmacokinetic model using NONMEM.
 
-TASK: Generate a complete NONMEM control stream file for population pharmacokinetic analysis.
-
-DATASET INFORMATION:
+═══════════════════════════════════════════════════════════════════
+DATASET CHARACTERISTICS
+═══════════════════════════════════════════════════════════════════
 {dataset_info}
 
-DATA SUMMARY:
 {data_summary}
 
-AVAILABLE COLUMNS:
-{', '.join(columns)}
+Available columns: {', '.join(columns)}
+Identified NONMEM columns: {_format_dict(nonmem_columns)}
+Subject-level covariates: {', '.join(covariates) if covariates else 'None'}
 
-NONMEM STANDARD COLUMNS DETECTED:
-{_format_dict(nonmem_columns)}
+═══════════════════════════════════════════════════════════════════
+MODEL DEVELOPMENT FRAMEWORK
+═══════════════════════════════════════════════════════════════════
 
-COVARIATES (Subject-level variables):
-{', '.join(covariates) if covariates else 'None detected'}
+PHASE 1: STRUCTURAL MODEL SELECTION
+Assess administration route and disposition characteristics:
+- Oral administration (AMT>0, EVID=1, CMT=1): Use ADVAN2 TRANS2
+  * ADVAN2: 1-compartment with first-order absorption
+  * Parameters: CL, V, KA
+  * Scaling: S2 = V (depot compartment scales by central volume)
 
-INSTRUCTIONS:
-1. Create a complete NONMEM control stream with all necessary sections:
-   - $PROBLEM: Clear description
-   - $INPUT: Map all columns (use DROP for unused columns)
-   - $DATA: Reference the input file
-   - $SUBROUTINES: Choose appropriate ADVAN/TRANS
-   - $PK: Define structural model with relevant covariates
-   - $ERROR: Define residual error model (consider proportional, additive, or combined)
-   - $THETA: Initial estimates and bounds for structural parameters
-   - $OMEGA: Inter-individual variability
-   - $SIGMA: Residual variability
-   - $ESTIMATION: Use appropriate method (FOCE INTER is common)
-   - $COVARIANCE
-   - $TABLE: Output relevant parameters
+- IV bolus/infusion (AMT>0, RATE>=0): Use ADVAN1 TRANS2 or ADVAN2
+  * ADVAN1: 1-compartment IV
+  * Parameters: CL, V
+  * Scaling: S1 = V
 
-2. Model selection guidance:
-   - For most oral/IV drugs: 1-compartment or 2-compartment model
-   - Consider absorption lag time if oral
-   - Include relevant covariates on clearance and volume
-   - Use allometric scaling for weight if appropriate
+Start with the simplest model that captures the essential PK processes.
 
-3. Initial parameter estimates:
-   - Provide reasonable starting values based on typical PK parameters
-   - Set appropriate bounds (lower, initial, upper)
-   - Typical population values with ~20-50% IIV
+PHASE 2: PARAMETER ESTIMATION STRATEGY
+Typical population values (adjust based on drug class):
+- Clearance (CL): 1-10 L/h for small molecules
+  * Renal clearance: ~GFR × fu (~8 L/h)
+  * Hepatic clearance: can approach liver blood flow (~90 L/h)
 
-4. Output ONLY the NONMEM control stream code.
-   - Start with $PROBLEM
-   - End with $TABLE
-   - Use semicolons for comments
-   - Ensure proper NONMEM syntax
+- Volume of distribution (V): 10-100 L
+  * Hydrophilic drugs: ~0.2-0.3 L/kg (~15-20 L/70kg)
+  * Lipophilic drugs: ~1-10 L/kg (70-700 L/70kg)
 
-5. Make this a scientifically sound, executable model that can run successfully.
+- Absorption rate constant (KA): 0.5-3 h⁻¹ for oral drugs
+  * Fast absorption: >2 h⁻¹
+  * Moderate: 0.5-2 h⁻¹
+  * Slow/sustained release: <0.5 h⁻¹
 
-GENERATE THE NONMEM CONTROL STREAM NOW:
+PHASE 3: COVARIATE MODEL SPECIFICATION
+Implement physiologically-based covariate relationships:
+
+Weight effects (use allometric scaling):
+- On CL: TVCL = THETA(CL) * (WT/70)^0.75
+  * Exponent 0.75: metabolic scaling law
+- On V: TVV = THETA(V) * (WT/70)^1
+  * Exponent 1: proportional to body size
+
+Other covariates (if data supports):
+- Age on CL: consider maturation/decline functions
+- Renal function on CL: CRCL effects for renally eliminated drugs
+- Sex, genotype: include only if mechanistically justified
+
+PHASE 4: RANDOM EFFECTS STRUCTURE
+Inter-individual variability (IIV):
+- Lognormal distribution: P_i = TV_P * EXP(ETA_i)
+- Interpretation: ETA ~ N(0, OMEGA)
+- Initial OMEGA values: 0.1-0.3 (corresponds to ~30-55% CV)
+
+Start with diagonal OMEGA matrix (assume independence):
+$OMEGA
+0.1  ; IIV on CL
+0.1  ; IIV on V
+0.2  ; IIV on KA (if oral)
+
+Consider BLOCK structure only if:
+- Strong physiological basis for correlation
+- Sufficient data to support estimation
+- Improved model diagnostics
+
+PHASE 5: RESIDUAL ERROR MODEL
+Select error structure based on data characteristics:
+
+a) Proportional error (recommended for PK data):
+   IPRED = F
+   Y = IPRED * (1 + EPS(1))
+
+   When: Error scales with concentration
+   SIGMA: 0.04-0.1 (20-30% CV)
+
+b) Combined proportional + additive:
+   IPRED = F
+   W = IPRED
+   Y = IPRED + W*EPS(1) + EPS(2)
+
+   When: Constant error at low concentrations, proportional at high
+   SIGMA(1): 0.04-0.1 (proportional)
+   SIGMA(2): 0.1-1 (additive, in concentration units)
+
+c) Additive (rarely used alone):
+   IPRED = F
+   Y = IPRED + EPS(1)
+
+   When: Constant absolute error (uncommon for PK)
+
+PHASE 6: ESTIMATION METHOD CONFIGURATION
+Use first-order conditional estimation:
+$ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
+
+Parameters:
+- METHOD=1: FOCE (First-Order Conditional Estimation)
+- INTER: Interaction between IIV (ETA) and residual error (EPS)
+- MAXEVAL=9999: Maximum function evaluations
+- PRINT=5: Print every 5th iteration
+- POSTHOC: Compute individual parameter estimates
+
+Add covariance step:
+$COVARIANCE PRINT=E
+- Estimates parameter uncertainty (SE, RSE%)
+- Computes correlations between parameters
+
+═══════════════════════════════════════════════════════════════════
+CRITICAL SYNTAX REQUIREMENTS
+═══════════════════════════════════════════════════════════════════
+
+1. $INPUT Declaration:
+   - List ALL columns from dataset in order
+   - Use DROP for unused columns
+   - Example: $INPUT ID TIME AMT DV EVID MDV CMT WT SEX DROP DROP
+
+2. $PK Block Requirements:
+   - Define all typical values (TVCL, TVV, TVKA)
+   - Apply covariate effects to typical values
+   - Define individual parameters with EXP(ETA) for lognormal
+   - MUST define scaling: S2 = V (for ADVAN2) or S1 = V (for ADVAN1)
+   - Assign CL, V, KA to NONMEM-recognized names
+
+3. $ERROR Block Requirements:
+   - MUST define IPRED = F first
+   - For combined error: define W = IPRED before Y equation
+   - Ensure proper operator precedence: use parentheses
+
+4. Parameter Bounds Format:
+   Format: (lower, initial) or (lower, initial, upper)
+   - Lower bound: Use 0 for positive parameters (CL, V, KA)
+   - Initial: Physiologically reasonable value
+   - Upper: Optional, use if parameter should be constrained
+   - Example: (0, 3) or (0, 3, 100)
+
+5. $TABLE Statement:
+   Include diagnostic variables for model evaluation:
+   - ID, TIME, DV: observed data
+   - IPRED: individual predictions
+   - PRED: population predictions (if needed)
+   - CWRES: conditional weighted residuals
+   - File format: ONEHEADER NOPRINT FILE=outputname
+
+═══════════════════════════════════════════════════════════════════
+GENERATE NONMEM CONTROL STREAM
+═══════════════════════════════════════════════════════════════════
+Based on the dataset provided, generate a complete, syntactically correct, executable NONMEM control stream.
+
+Requirements:
+1. Use appropriate ADVAN based on data characteristics
+2. Include physiologically plausible initial estimates
+3. Implement covariate effects if supported by data
+4. Use proven syntax for all blocks
+5. Ensure all referenced columns exist in dataset
+6. Add brief comments explaining key decisions
+7. Output ONLY the NONMEM control stream code
+
+Structure:
+$PROBLEM [descriptive title]
+$DATA [filename] IGNORE=@
+$INPUT [all columns]
+$SUBROUTINES [ADVAN TRANS]
+$PK [parameter model]
+$ERROR [error model]
+$THETA [initial estimates with bounds]
+$OMEGA [IIV structure]
+$SIGMA [residual error]
+$ESTIMATION [method settings]
+$COVARIANCE [options]
+$TABLE [output specification]
+
+Generate the control stream now:
 """
         return prompt
 
@@ -110,82 +239,135 @@ GENERATE THE NONMEM CONTROL STREAM NOW:
             Formatted prompt string
         """
         history_text = _format_improvement_history(previous_improvements)
-
         issues_text = "\n".join([f"- {issue}" for issue in issues_found]) if issues_found else "None detected"
 
-        prompt = f"""You are an expert pharmacometrician iteratively improving a NONMEM model.
+        prompt = f"""Diagnose and resolve issues in the NONMEM model.
 
-ITERATION: {iteration}
+═══════════════════════════════════════════════════════════════════
+ITERATION {iteration} - MODEL REFINEMENT
+═══════════════════════════════════════════════════════════════════
 
-DATASET INFORMATION:
-{dataset_info}
-
-CURRENT NONMEM CODE:
+CURRENT MODEL:
 ```
 {current_code}
 ```
 
-NONMEM OUTPUT:
+NONMEM EXECUTION OUTPUT:
 ```
 {nonmem_output}
 ```
 
-DETECTED ISSUES:
+IDENTIFIED ISSUES:
 {issues_text}
 
-PREVIOUS IMPROVEMENT HISTORY:
+OPTIMIZATION HISTORY:
 {history_text}
 
-TASK: Analyze the NONMEM output and improve the model. Consider:
+═══════════════════════════════════════════════════════════════════
+DIAGNOSTIC FRAMEWORK
+═══════════════════════════════════════════════════════════════════
 
-1. MINIMIZATION STATUS:
-   - Did minimization succeed?
-   - Are there any boundary issues?
-   - Is the gradient acceptable?
-   - Are there rounding errors?
+LEVEL 1: SYNTAX AND STRUCTURAL ERRORS
+Check for:
+□ Column name mismatches ($INPUT vs dataset)
+□ Missing scaling parameter (S1 or S2 in $PK)
+□ Incorrect $ERROR syntax (especially combined error model)
+□ Parameter bound violations (initial outside [lower, upper])
+□ Undefined variables referenced in equations
+□ FORTRAN syntax errors (operators, parentheses)
 
-2. PARAMETER ESTIMATES:
-   - Are estimates reasonable?
-   - Any parameters hitting bounds?
-   - High RSE% (>50%) indicating poor precision?
-   - High correlations between parameters?
+Common fixes:
+- $ERROR combined model: Must use IPRED=F, W=IPRED, then Y=IPRED+W*EPS(1)+EPS(2)
+- Scaling: Add S2=V (ADVAN2) or S1=V (ADVAN1) in $PK
+- Columns: Verify all referenced columns exist in dataset
 
-3. OBJECTIVE FUNCTION VALUE:
-   - What is the current OFV?
-   - How does it compare to previous iterations?
+LEVEL 2: NUMERICAL STABILITY ISSUES
+Check for:
+□ Initial estimates orders of magnitude off
+□ OMEGA/SIGMA too large (>1) or too small (<0.001)
+□ Parameters hitting bounds during estimation
+□ Rounding errors or ill-conditioning warnings
 
-4. MODEL DIAGNOSTICS:
-   - Any warnings or errors?
-   - Condition number issues?
-   - Covariance step successful?
+Remediation strategies:
+- Adjust THETA initial values to physiologically realistic ranges
+- Reduce IIV initial estimates (try 0.1-0.3)
+- Simplify OMEGA structure (use diagonal instead of BLOCK)
+- Remove poorly estimated random effects
 
-5. POSSIBLE IMPROVEMENTS:
-   - Adjust initial estimates
-   - Simplify model (remove unnecessary IIV)
-   - Try different parameterization
-   - Fix parameters with poor identifiability
-   - Adjust bounds
-   - Change estimation method settings
-   - Add or remove covariates
-   - Try different structural model
+LEVEL 3: MODEL OVERPARAMETERIZATION
+Symptoms:
+- High RSE% (>50%) on multiple parameters
+- Correlation coefficients near ±1
+- Failure to compute covariance matrix
+- Boundary estimates (OMEGA or SIGMA near zero)
 
-INSTRUCTIONS:
-1. First, provide a brief analysis (2-3 sentences) of the current model status
-2. Then, provide the IMPROVED NONMEM control stream code
-3. Make ONE focused improvement per iteration
-4. Explain what you changed and why (after the code)
+Solutions:
+- Fix or remove IIV on poorly estimated parameters
+- Simplify covariate relationships
+- Use fewer random effects
+- Consider simpler structural model
 
-Format your response as:
-ANALYSIS: [Your analysis here]
+LEVEL 4: CONVERGENCE PROBLEMS
+If minimization not successful:
+1. Check for programming errors first (Level 1)
+2. Try different initial estimates
+3. Simplify random effects structure
+4. Increase MAXEVAL or try different METHOD
+5. Fix problematic parameters temporarily
+
+═══════════════════════════════════════════════════════════════════
+IMPROVEMENT STRATEGY
+═══════════════════════════════════════════════════════════════════
+
+Priority order:
+1. Fix syntax errors (model won't run)
+2. Correct structural problems (S2 missing, wrong ADVAN)
+3. Adjust initial estimates (numerical issues)
+4. Simplify if overparameterized
+5. Refine once stable
+
+Make ONE targeted change per iteration:
+- Focus on the most critical issue
+- Preserve what works
+- Avoid multiple simultaneous changes
+- Document the rationale
+
+═══════════════════════════════════════════════════════════════════
+GENERATE IMPROVED MODEL
+═══════════════════════════════════════════════════════════════════
+
+Based on the diagnostic output, provide:
+
+1. ANALYSIS (2-3 sentences):
+   - Primary issue identified
+   - Root cause (syntax, numerical, structural)
+   - Proposed solution approach
+
+2. IMPROVED CODE:
+   - Complete corrected NONMEM control stream
+   - Implement one focused improvement
+   - Maintain overall model structure
+   - Ensure syntactic correctness
+
+3. CHANGES MADE:
+   - Specific modifications with rationale
+   - Expected impact on model performance
+
+Format your response:
+
+ANALYSIS:
+[Concise diagnosis of the primary issue]
 
 IMPROVED CODE:
 ```
-[NONMEM control stream]
+[Complete corrected NONMEM control stream]
 ```
 
-CHANGES MADE: [Brief explanation of changes]
+CHANGES MADE:
+[List specific modifications and reasons]
 
-EXPECTED IMPROVEMENT: [What you expect this change to achieve]
+EXPECTED OUTCOME:
+[What this change should achieve]
 """
         return prompt
 
@@ -269,8 +451,10 @@ def _format_improvement_history(history: List[Dict]) -> str:
         lines.append(f"Iteration {i}:")
         lines.append(f"  Status: {item.get('status', 'unknown')}")
         lines.append(f"  Changes: {item.get('changes', 'N/A')}")
-        if 'ofv' in item:
+        if 'ofv' in item and item['ofv'] is not None:
             lines.append(f"  OFV: {item['ofv']:.2f}")
+        elif 'ofv' in item:
+            lines.append(f"  OFV: Not available")
         if 'issues' in item:
             lines.append(f"  Issues: {', '.join(item['issues']) if item['issues'] else 'None'}")
         lines.append("")
