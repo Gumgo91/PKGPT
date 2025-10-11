@@ -1,0 +1,72 @@
+;; 1. Based on: 520
+;; 2. Description: Phenobarbital IV + PO, CL/F, V/F (1-compartment)
+$PROBLEM Phenobarbital IV + PO, CL/F, V/F (1-compartment)
+
+$DATA neo.CSV IGNORE=@
+$INPUT ID TIME AMT RATE DV MDV EVID CMT GA GAG PNA PMA WT HT SEX CREA TBIL ALT AST DIA MID PHEN
+
+$SUBROUTINES ADVAN2 TRANS2
+
+
+$PK
+	SIZE=WT/3.66
+  ; 기본 파라미터 설정
+  TM50 = THETA(5)  ; Maturation half-life (PMA units, e.g., weeks)
+  HILL = THETA(6)  ; Hill coefficient
+  MAT_FACTOR = (PMA**HILL) / (TM50**HILL + PMA**HILL)
+  TVCL = THETA(1)*(SIZE**0.75) * MAT_FACTOR ; <-- 4줄 추가/수정
+
+  TVV  = THETA(2)*SIZE
+  TVKA = THETA(3)
+  F1O  = THETA(4)
+
+
+  ; 개체간 변이
+  CL = TVCL * EXP(ETA(1))
+  V  = TVV  * EXP(ETA(2))
+
+  ; 흡수속도상수/생체이용률
+  KA = TVKA         ; 항상 정의 (Oral에만 실제 사용)
+  F1 = 1            ; IV 기본값
+  S1 = V            ; IV 구획 스케일
+  S2 = V            ; Oral 구획 스케일(항상 정의)
+
+  IF (CMT.EQ.2) THEN
+    F1 = F1O        ; 경구 생체이용률만 변경
+    ; S2는 이미 위에서 정의됨
+  ENDIF
+
+CL_F = CL / F1
+V_F  = V / F1
+
+$ERROR
+W = F
+IPRED = F
+Y = F + F*EPS(1) +EPS(2)
+IRES = DV-IPRED
+IWRES = IRES/W
+
+$THETA
+(0, 0.0293) ;[1] TVCL (L/h)
+(0, 2.36) ;[2] TVV (L)
+(0, 50) FIX ;[3] KA  (1/h)
+(0, 0.462) FIX ;[4] F1  (bioavailability, for oral)
+(0, 39.8) ;[5] TM50 (PMA in weeks) - 초기 추정치 (e.g., 40주)
+(0, 7.08) ;[6] HILL coefficient - 초기에는 1로 고정 후 추정 시도
+
+$OMEGA
+ 0.205 ; ETA on CL
+ 0.087 ; ETA on V
+
+$SIGMA
+ 6.17E-09 FIX 
+ 52
+
+$EST METHOD=1 MAXEVAL=99999 SIG=3 PRINT=5 NOABORT POSTHOC INTERACTION
+$COV PRINT=E
+
+
+$TABLE ID AMT TIME RATE DV MDV EVID IPRED PRED IRES IWRES WRES CWRES ONEHEADER NOPRINT FILE = sdtab303
+$TABLE ID CL V ETA(1) ETA(2) ONEHEADER NOPRINT NOAPPEND FILE = patab303
+$TABLE ID GA GAG PNA PMA WT HT SEX CREA TBIL NOAPPEND FILE = cotab303
+$TABLE ID ALT AST DIA MID PHEN NOAPPEND FILE = catab303
