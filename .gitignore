@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Environment variables (IMPORTANT: API keys)
+.env
+.env.local
+.env.*.local
+
+# NONMEM outputs
+*.lst
+*.ext
+*.cov
+*.cor
+*.coi
+*.phi
+*.xml
+*tab*
+*.msf
+*.msfo
+*.shk
+FDATA
+FSTREAM
+FREPORT
+FCON
+FMSG
+FSUBS*
+FSUBS.f90
+FSUBS.f
+LINK.LNK
+lnk.lnk
+INTER
+fort.*
+*.o
+*.exe
+temp_dir/
+compile/
+*.d
+*.mod
+worker*
+*.cpu
+*.set
+
+# IDE (Claude Code, VS Code, etc.)
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# Claude Code specific
+.claude_code/
+.claude-session/
+.mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test outputs and temporary files
+output_*
+test_*
+tmp_*
+temp_*
+
+# Logs
+*.log
+logs/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Internal documentation (not for public repo)
+FINAL_SUMMARY.md
+FINAL_*.md
+*_INTERNAL.md

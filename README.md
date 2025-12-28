@@ -19,10 +19,20 @@ PKGPT automatically generates and iteratively improves NONMEM population pharmac
 ## Features
 
 - **Automated Model Generation**: Creates complete NONMEM control streams from data
+- **Automatic Compartment Detection**: Analyzes concentration-time profiles to intelligently select model structure
+  - NCA-based terminal phase λz estimation (log-linear regression)
+  - Early distribution phase slope analysis after Cmax
+  - BIC-based comparison of 1-compartment vs 2-compartment models
+  - Conservative algorithm: Only suggests 2-compartment when strong biphasic pattern detected (slope ratio ≥ 3.0, R² ≥ 0.98)
+  - Prevents overfitting by defaulting to simpler 1-compartment model in ambiguous cases
 - **Recursive Optimization**: Iteratively improves models based on NONMEM output
 - **Multi-Model Support**: Uses multiple Gemini models (Flash, Flash-Lite, Pro)
 - **Smart Analysis**: Detects NONMEM columns, covariates, and data structure
-- **Robust Parsing**: Extracts key information from NONMEM output files
+- **AI-Powered Parsing**: Uses Gemini to intelligently parse NONMEM output with automatic regex fallback
+  - Context-aware extraction of OFV, parameters, warnings, and errors
+  - Accurate RSE% and Shrinkage% calculation
+  - Distinguishes between real errors and code comments
+  - More robust than traditional regex patterns
 - **Progress Tracking**: Clear iteration history and improvement metrics
 
 ## Requirements
@@ -139,20 +149,36 @@ The system analyzes your dataset to understand:
 - NONMEM standard columns
 - Subject-level covariates
 - Data dimensions and statistics
+- **Pharmacokinetic profile characteristics**:
+  - Terminal elimination rate constant (λz) via log-linear regression on tail concentrations
+  - Early distribution phase slope (λearly) after Cmax
+  - Mono-exponential vs biphasic decay pattern detection
+  - **Automatic compartment model recommendation** (1-comp vs 2-comp) based on:
+    - BIC comparison (Bayesian Information Criterion)
+    - Slope ratio (λearly/λz) and goodness-of-fit (R²)
+    - Conservative threshold: 2-compartment only if ΔBIC > 20 AND slope ratio ≥ 3.0 AND R² ≥ 0.98
 
 ### 2. Initial Model Generation
-Using Google Gemini Pro, generates:
+Using Google Gemini Pro with data-driven insights, generates:
 - Complete NONMEM control stream
-- Appropriate structural model (1-comp, 2-comp, etc.)
+- **Appropriate structural model** based on automatic compartment detection
+  - Data-informed selection between 1-compartment (ADVAN2) and 2-compartment (ADVAN4) models
+  - Prevents unnecessary complexity in model structure
 - Initial parameter estimates
 - Covariate relationships
 
 ### 3. Recursive Optimization
 For each iteration:
 1. Execute NONMEM
-2. Parse output (.lst file)
+2. **AI-Parse output** (.lst file) with automatic fallback
+   - Gemini extracts OFV, parameters, RSE%, Shrinkage%
+   - Context-aware error detection
+   - Falls back to regex if AI parsing fails
 3. Identify issues and warnings
-4. Generate improved model
+4. Generate improved model considering:
+   - Objective Function Value (lower is better)
+   - RSE% (< 30% for THETA, < 50% for OMEGA)
+   - ETA Shrinkage (< 30% is good)
 5. Repeat until convergence or max iterations
 
 ### 4. Convergence Criteria
