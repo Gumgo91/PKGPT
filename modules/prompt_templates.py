@@ -5,7 +5,7 @@ Systematic model development with best practices from pharmacometrics
 Key features:
 - Comprehensive ADVAN selection (ADVAN1-13)
 - Phase-separated prompts for focused improvements
-- Enhanced estimation method selection (FO/FOCE/FOCE-I)
+- Enhanced estimation method selection (FOCE-I as default)
 - Covariate analysis methodology
 - Evidence-based model diagnostic criteria
 """
@@ -190,27 +190,25 @@ For complex models not covered by special ADVANs, use ADVAN6/13 with $DES
         Estimation method selection based on dataset size
 
         Methods:
-        - METHOD=ZERO (FO): First Order
-        - METHOD=1 (FOCE): First Order Conditional Estimation
-        - METHOD=1 INTER (FOCE-I): FOCE with Interaction
+        - METHOD=1 INTER (FOCE-I): First Order Conditional Estimation with Interaction (DEFAULT)
+        - METHOD=1 (FOCE): FOCE without Interaction (fallback)
         """
 
         if n_subjects < 15:
             return """
-**METHOD=ZERO (First Order) - REQUIRED for N<15**
+**METHOD=1 INTER (FOCE-I) - STANDARD even for small datasets**
 
 ```
-$ESTIMATION METHOD=ZERO MAXEVAL=9999 PRINT=5 POSTHOC
+$ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
 ```
 
-Why FO for small datasets:
-- More robust and stable
-- Faster convergence
-- Less sensitive to poor initial estimates
-- Lower computational burden
-- Better for sparse data
+Why FOCE-I for small datasets:
+- More accurate parameter estimates
+- Accounts for correlation between IIV and residual error
+- Standard method for population PK analysis
+- Preferred by regulatory agencies (FDA/EMA)
 
-Trade-off: Less accurate for models with high IIV, but stability is critical for N<15
+Note: If convergence issues occur, try simplifying OMEGA structure or adjusting initial estimates before changing estimation method.
 """
         elif n_subjects < 30:
             return """
@@ -222,11 +220,11 @@ $ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
 
 Why FOCE-I for N=15-30:
 - Accounts for correlation between IIV and residual error
-- More accurate parameter estimates than FO
+- More accurate parameter estimates
 - Standard method for population PK
 - Good balance between accuracy and stability
 
-Note: Can fallback to METHOD=ZERO if convergence issues occur
+Note: If convergence issues occur, try METHOD=1 (FOCE without interaction) as fallback.
 """
         else:
             return """
@@ -310,16 +308,16 @@ V  = TVV * EXP(ETA(2))
 KA = TVKA * EXP(ETA(3))
 ```
 
-**CRITICAL**: Use METHOD=ZERO (First Order) instead of METHOD=1 INTER:
+**CRITICAL**: Use METHOD=1 INTER (FOCE-I) as default estimation:
 ```
-$ESTIMATION METHOD=ZERO MAXEVAL=9999 PRINT=5 POSTHOC
+$ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
 ```
 
-**WHY METHOD=ZERO for small datasets:**
-- More robust and stable
-- Faster convergence
-- Less sensitive to poor initial estimates
-- Better for N<20
+**WHY FOCE-I even for small datasets:**
+- More accurate parameter estimates
+- Standard regulatory-accepted method
+- Accounts for eta-epsilon interaction
+- If convergence fails, simplify OMEGA structure first
 
 **WHY diagonal OMEGA (not BLOCK):**
 - Simpler to estimate (no correlations)
@@ -347,7 +345,7 @@ V  = TVV * EXP(ETA(2))
 KA = TVKA * EXP(ETA(3))
 ```
 
-**Use METHOD=1 INTER** (can handle more complexity than FO):
+**Use METHOD=1 INTER** (standard for population PK):
 ```
 $ESTIMATION METHOD=1 INTER MAXEVAL=9999 PRINT=5 POSTHOC
 ```
@@ -502,8 +500,8 @@ $SIGMA
 
 **Troubleshooting convergence issues:**
 - If FOCE-I fails → Try METHOD=1 (FOCE without interaction)
-- If FOCE fails → Fallback to METHOD=ZERO (FO)
-- If still fails → Check initial estimates, simplify OMEGA structure
+- If FOCE fails → Simplify OMEGA structure, adjust initial estimates, or try METHOD=IMP
+- If still fails → Check initial estimates, reduce number of OMEGA parameters
 
 **PHASE 6: OUTPUT AND DIAGNOSTICS**
 
@@ -600,7 +598,7 @@ Current model has ONLY 1 OMEGA parameter.
 
 Why:
 - Removing it → non-population model
-- METHOD=1 INTER will fail ("SINGLE-SUBJECT DATA" error)
+- METHOD=1 INTER may need simplified OMEGA for very small N ("SINGLE-SUBJECT DATA" error)
 - For N={n_subjects}: shrinkage 50-75% with 1 OMEGA is ACCEPTABLE
 
 What you CAN do:
@@ -649,7 +647,7 @@ PROHIBITED:
 ❌ Just adjust bounds without simplifying
 
 ALLOWED:
-✓ Change METHOD (e.g., METHOD=1 → METHOD=ZERO for stability)
+✓ Change METHOD (e.g., METHOD=1 INTER → METHOD=1 without INTER for stability)
 ✓ Simplify error model if needed
 ✓ Remove OMEGA (but keep at least 1)
 
@@ -729,7 +727,7 @@ Actions:
    - THETA out of bounds → Adjust (lower, initial, upper)
    - Parameters hitting bounds → Widen or FIX to typical value
 3. Fix estimation issues
-   - Convergence failure → Try METHOD=ZERO instead of METHOD=1 INTER
+   - Convergence failure → Simplify OMEGA structure or try METHOD=1 (without INTER)
    - "SINGLE-SUBJECT DATA" error → Check OMEGA count ≥1
 4. Ensure minimization successful (MINIMIZATION SUCCESSFUL in output)
 
@@ -770,7 +768,7 @@ Actions when overfitting detected:
 3. Fix problematic THETA to a reasonable typical value when it is poorly estimated or stuck on bounds.
    - For example, fix maturation or peripheral volumes if data do not inform them.
 4. Change estimation method
-   - METHOD=1 INTER → METHOD=ZERO (more robust for very small N)
+   - METHOD=1 INTER → METHOD=1 (without INTER, more robust for small N)
 **CRITICAL: OMEGA=1 PROTECTION**
 If only 1 OMEGA remains:
 - DO NOT remove it (would become non-population model)
@@ -1159,7 +1157,7 @@ MODEL EVALUATION FRAMEWORK
 
 5. **MODEL COMPLEXITY vs DATASET SIZE**
    Dataset size appropriateness:
-   - N<15: Maximum 1-2 OMEGA, METHOD=ZERO, simple error model
+   - N<15: Maximum 1-2 OMEGA, METHOD=1 INTER, simple error model
    - N=15-30: Maximum 2-3 OMEGA, METHOD=1 INTER, combined/proportional error
    - N=30-50: 3-4 OMEGA possible, METHOD=1 INTER, can try BLOCK OMEGA
    - N>50: More complex models supported

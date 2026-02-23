@@ -14,9 +14,9 @@ class GeminiClient:
 
     # Model configurations
     MODELS = {
-        'flash': 'gemini-flash-latest',
+        'flash': 'gemini-3-flash-preview',
         'flash-lite': 'gemini-flash-lite-latest',
-        'pro': 'gemini-2.5-pro'
+        'pro': 'gemini-3-pro'
     }
 
     def __init__(self, api_key: Optional[str] = None, model_type: str = 'pro'):

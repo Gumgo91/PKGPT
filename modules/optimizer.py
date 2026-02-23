@@ -212,7 +212,7 @@ class NONMEMOptimizer:
 
         # Save to file
         iteration_file = f"{self.output_base}_iter0.txt"
-        with open(iteration_file, 'w') as f:
+        with open(iteration_file, 'w', encoding='utf-8') as f:
             f.write(self.current_code)
 
         # Store in code history
@@ -340,12 +340,12 @@ class NONMEMOptimizer:
             print("[INFO] Will attempt to fix in next iteration")
 
             # Create a mock error output file
-            with open(output_file, 'w') as f:
+            with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(f"SYNTAX VALIDATION ERROR\n\n{validation_error}\n")
             return False
 
         # Write current code to input file
-        with open(input_file, 'w') as f:
+        with open(input_file, 'w', encoding='utf-8') as f:
             # Update $DATA line to point to actual data file
             code = self.current_code
             # Use absolute path to ensure NONMEM can find the data file
@@ -442,7 +442,7 @@ OBJECTIVE FUNCTION VALUE: {1000 + self.iteration * 10}
 
 This mock allows the optimizer to continue and demonstrate the recursive improvement process.
 """
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write(mock_output)
 
     def _parse_results(self) -> Optional[NONMEMParser]:
@@ -582,7 +582,10 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                     shrink_val = avg_shrink
                     prev_val = prev_ofv
                     curr_val = current_ofv
-                    print(f"  [ANALYSIS] High shrinkage ({shrink_val:.1f}%) BUT OFV worsened")
+                    if shrink_val is not None:
+                        print(f"  [ANALYSIS] High shrinkage ({shrink_val:.1f}%) BUT OFV worsened")
+                    else:
+                        print(f"  [ANALYSIS] High shrinkage (N/A%) BUT OFV worsened")
                     print(f"  [ANALYSIS] OFV changed from {prev_val:.1f} to {curr_val:.1f}")
                     print(f"  [ANALYSIS] This suggests UNDERPARAMETERIZATION, not overfitting")
                     return False
@@ -890,7 +893,8 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                 quality_parts.append(f"OFV={ofv_val:.2f}")
             if avg_eta_shrinkage is not None:
                 shrink_val = avg_eta_shrinkage
-                quality_parts.append(f"Shrink={shrink_val:.1f}%")
+                if shrink_val is not None:
+                    quality_parts.append(f"Shrink={shrink_val:.1f}%")
             quality_str = ', '.join(quality_parts)
             print(f"\n[OK] NEW BEST MODEL: {quality_str}")
 
@@ -949,7 +953,10 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                     thresh_val = shrinkage_threshold
                     n_val = num_subjects
                     print(f"\n[OVERRIDE] AI suggested stopping but shrinkage too high")
-                    print(f"[OVERRIDE] Shrinkage {shrink_val:.1f}% > threshold {thresh_val}% for N={n_val}")
+                    if shrink_val is not None:
+                        print(f"[OVERRIDE] Shrinkage {shrink_val:.1f}% > threshold {thresh_val}% for N={n_val}")
+                    else:
+                        print(f"[OVERRIDE] Shrinkage N/A% > threshold {thresh_val}% for N={n_val}")
                     print(f"[OVERRIDE] Continuing optimization")
                     return True
 
@@ -979,7 +986,10 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                 print(f"  - Minimization: {min_status}")
                 shrink_val = avg_eta_shrinkage
                 thresh_val = shrinkage_threshold
-                print(f"  - Shrinkage: {shrink_val:.1f}% (threshold: <{thresh_val}%)")
+                if shrink_val is not None:
+                    print(f"  - Shrinkage: {shrink_val:.1f}% (threshold: <{thresh_val}%)")
+                else:
+                    print(f"  - Shrinkage: N/A (threshold: <{thresh_val}%)")
                 if self.improvement_history and 'ai_evaluation' in self.improvement_history[-1]:
                     last_eval = self.improvement_history[-1]['ai_evaluation']
                     quality_score = last_eval.get('quality_score', 0)
@@ -1005,7 +1015,10 @@ This mock allows the optimizer to continue and demonstrate the recursive improve
                         print(f"  Reason:")
                         print(f"    - Only 1 OMEGA parameter remains")
                         print(f"    - Dataset size: {n_val} subjects (small)")
-                        print(f"    - Shrinkage {shrink_val:.1f}% is ACCEPTABLE for N<20")
+                        if shrink_val is not None:
+                            print(f"    - Shrinkage {shrink_val:.1f}% is ACCEPTABLE for N<20")
+                        else:
+                            print(f"    - Shrinkage N/A% is ACCEPTABLE for N<20")
                         print(f"    - Further simplification would remove last OMEGA")
                         print(f"    - Model would become non-population (NONMEM will fail)")
                         print(f"  Decision: STOP to preserve model viability")
@@ -1784,15 +1797,30 @@ DO NOT:
             if shrink is not None:
                 shrink_val = shrink
                 if shrink < 30:
-                    print(f"ETA Shrinkage: {shrink_val:.1f}% - EXCELLENT ✓")
+                    if shrink_val is not None:
+                        print(f"ETA Shrinkage: {shrink_val:.1f}% - EXCELLENT ✓")
+                    else:
+                        print(f"ETA Shrinkage: N/A - EXCELLENT ✓")
                 elif shrink < 50:
-                    print(f"ETA Shrinkage: {shrink_val:.1f}% - GOOD ✓")
+                    if shrink_val is not None:
+                        print(f"ETA Shrinkage: {shrink_val:.1f}% - GOOD ✓")
+                    else:
+                        print(f"ETA Shrinkage: N/A - GOOD ✓")
                 elif shrink < 70:
-                    print(f"ETA Shrinkage: {shrink_val:.1f}% - ACCEPTABLE ⚠")
+                    if shrink_val is not None:
+                        print(f"ETA Shrinkage: {shrink_val:.1f}% - ACCEPTABLE ⚠")
+                    else:
+                        print(f"ETA Shrinkage: N/A - ACCEPTABLE ⚠")
                 elif shrink < 90:
-                    print(f"ETA Shrinkage: {shrink_val:.1f}% - CONCERNING ⚠")
+                    if shrink_val is not None:
+                        print(f"ETA Shrinkage: {shrink_val:.1f}% - CONCERNING ⚠")
+                    else:
+                        print(f"ETA Shrinkage: N/A - CONCERNING ⚠")
                 else:
-                    print(f"ETA Shrinkage: {shrink_val:.1f}% - CRITICAL ✗ (overfitting)")
+                    if shrink_val is not None:
+                        print(f"ETA Shrinkage: {shrink_val:.1f}% - CRITICAL ✗ (overfitting)")
+                    else:
+                        print(f"ETA Shrinkage: N/A - CRITICAL ✗ (overfitting)")
 
             if best_entry.get('covariance_successful'):
                 print("Covariance Step: SUCCESS ✓")

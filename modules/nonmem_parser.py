@@ -663,3 +663,46 @@ NONMEM OUTPUT:
     def get_full_output(self) -> str:
         """Get the full NONMEM output text"""
         return self.content
+
+    def diagnose_structural_model(self) -> Dict:
+        """
+        Diagnose structural model adequacy from residual patterns (Chapter 13, basic.pdf)
+
+        Returns:
+            Dictionary with structural diagnostics and recommendations
+        """
+        diagnostics = {
+            'has_table_data': False,
+            'residual_patterns': [],
+            'structural_adequate': True,
+            'recommendations': []
+        }
+
+        # Check for systematic patterns in residuals (would need table data)
+        # Since we're parsing .lst file, we can only provide guidance
+        # Real residual analysis would be done with table files (CWRES vs TIME/PRED)
+
+        # Check for warnings about structural misspecification
+        warnings = self.parsed_data.get('warnings', [])
+        for warning in warnings:
+            if any(keyword in warning.upper() for keyword in ['TREND', 'PATTERN', 'SYSTEMATIC']):
+                diagnostics['residual_patterns'].append(warning)
+                diagnostics['structural_adequate'] = False
+
+        # Provide guidance based on common structural issues
+        ofv = self.parsed_data.get('objective_function')
+        if ofv is not None and ofv < 0:
+            diagnostics['recommendations'].append(
+                "Negative OFV suggests potential structural misspecification"
+            )
+
+        # Check if multi-phasic decline might indicate need for 2-cmt model
+        if not diagnostics['structural_adequate']:
+            diagnostics['recommendations'].append(
+                "Check CWRES vs TIME plot for U-shaped or systematic patterns"
+            )
+            diagnostics['recommendations'].append(
+                "U-shaped residuals → Consider changing 1-cmt to 2-cmt model (ADVAN2→ADVAN4)"
+            )
+
+        return diagnostics
